@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weather Station</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f3f0;
+    --surface-1: #fcfcfb;
+    --border: #e2e1dc;
+    --grid: #ebeae6;
+    --axis: #b9b8b1;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #77766f;
+    --series-1: #2a78d6;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --good: #0ca30c;
+    --control-active: #0b0b0b;
+    --control-active-text: #fcfcfb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #111110;
+      --surface-1: #1a1a19;
+      --border: #2e2e2b;
+      --grid: #262624;
+      --axis: #4a4a46;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #94938a;
+      --series-1: #3987e5;
+      --control-active: #f0efec;
+      --control-active-text: #1a1a19;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #111110;
+    --surface-1: #1a1a19;
+    --border: #2e2e2b;
+    --grid: #262624;
+    --axis: #4a4a46;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #94938a;
+    --series-1: #3987e5;
+    --control-active: #f0efec;
+    --control-active-text: #1a1a19;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface-0);
+    color: var(--text-primary);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 14px; }
+  h1 { font-size: 22px; margin: 0; font-weight: 650; }
+  .status { color: var(--text-secondary); font-size: 14px; display: flex; align-items: center; gap: 6px; }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; }
+  .badge::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .badge.live { color: var(--good); }
+  .badge.stale { color: var(--critical); }
+  .badge > span { color: var(--text-primary); }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 16px; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-1); }
+  .seg button {
+    font: inherit; font-size: 14px; border: 0; background: transparent; color: var(--text-secondary);
+    padding: 6px 12px; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button[aria-pressed="true"] { background: var(--control-active); color: var(--control-active-text); }
+  select {
+    font: inherit; font-size: 14px; padding: 6px 8px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .tile .label { color: var(--text-secondary); font-size: 13px; }
+  .tile .value { font-size: 32px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .tile .value small { font-size: 16px; font-weight: 500; color: var(--text-secondary); margin-left: 2px; }
+  .tile .sub { color: var(--text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px 6px; margin-bottom: 12px; }
+  .card h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+  .card h2 span { color: var(--text-muted); font-weight: 400; }
+  .chart { position: relative; height: 180px; }
+  .chart svg { display: block; width: 100%; height: 100%; overflow: visible; }
+  .chart .hit { fill: transparent; cursor: crosshair; outline: none; }
+  .chart .hit:focus-visible { stroke: var(--series-1); stroke-width: 1; }
+  .gridline { stroke: var(--grid); stroke-width: 1; }
+  .baseline { stroke: var(--axis); stroke-width: 1; }
+  .tick { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .line { fill: none; stroke: var(--series-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .dot { fill: var(--series-1); stroke: var(--surface-1); stroke-width: 2; }
+  .crosshair { stroke: var(--text-muted); stroke-width: 1; }
+  .empty { fill: var(--text-muted); font-size: 13px; }
+
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 10; display: none;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 4px 16px rgb(0 0 0 / 0.12); padding: 8px 10px; font-size: 13px; min-width: 150px;
+  }
+  #tooltip .time { color: var(--text-secondary); margin-bottom: 4px; }
+  #tooltip .row { display: flex; justify-content: space-between; gap: 14px; }
+  #tooltip .row b { font-variant-numeric: tabular-nums; }
+  #tooltip .row span { color: var(--text-secondary); }
+
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--text-secondary); font-size: 14px; }
+  .table-wrap { overflow-x: auto; margin-top: 8px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 6px 12px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-secondary); font-weight: 600; position: sticky; top: 0; background: var(--surface-1); }
+  .note { color: var(--text-muted); font-size: 13px; margin-top: 6px; }
+  .error { color: var(--critical); font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="title">Weather station</h1>
+    <div class="status" id="status">Loading…</div>
+  </header>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Time range" id="range">
+      <button data-hours="24" aria-pressed="true">24 h</button>
+      <button data-hours="168" aria-pressed="false">7 days</button>
+      <button data-hours="720" aria-pressed="false">30 days</button>
+    </div>
+    <div class="seg" role="group" aria-label="Units" id="units">
+      <button data-unit="F" aria-pressed="true">°F</button>
+      <button data-unit="C" aria-pressed="false">°C</button>
+    </div>
+    <select id="device" aria-label="Station" hidden></select>
+  </div>
+
+  <section class="tiles" aria-label="Current conditions">
+    <div class="tile"><div class="label">Temperature</div><div class="value" id="v-temp">–</div><div class="sub" id="s-temp"></div></div>
+    <div class="tile"><div class="label">Humidity</div><div class="value" id="v-hum">–</div><div class="sub" id="s-hum"></div></div>
+    <div class="tile"><div class="label" id="l-pres">Pressure</div><div class="value" id="v-pres">–</div><div class="sub" id="s-pres"></div></div>
+    <div class="tile"><div class="label">Dew point</div><div class="value" id="v-dew">–</div><div class="sub" id="s-dew"></div></div>
+  </section>
+
+  <section class="card"><h2>Temperature <span id="u-temp"></span></h2><div class="chart" id="c-temp"></div></section>
+  <section class="card"><h2>Humidity <span>%</span></h2><div class="chart" id="c-hum"></div></section>
+  <section class="card"><h2 id="h-pres">Pressure <span>hPa</span></h2><div class="chart" id="c-pres"></div></section>
+
+  <details id="table-details">
+    <summary>Show data table</summary>
+    <div class="table-wrap"><table id="table"></table></div>
+    <div class="note" id="table-note"></div>
+  </details>
+</main>
+<div id="tooltip" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+const SVGNS = "http://www.w3.org/2000/svg";
+const STALE_MS = 5 * 60 * 1000;
+const REFRESH_MS = 60 * 1000;
+// Bucket size (seconds) per range, so each chart has roughly 700 points or fewer.
+const BUCKETS = { 24: 0, 168: 900, 720: 3600 };
+
+const store = {
+  get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } },
+};
+
+const state = {
+  hours: Number(store.get("ws.hours", "24")),
+  unit: store.get("ws.unit", "F"),
+  device: store.get("ws.device", ""),
+  altitude: 0,
+  latest: [],
+  rows: [],
+  hoverIndex: null,
+};
+if (!(state.hours in BUCKETS)) state.hours = 24;
+
+// ---------- conversions ----------
+const toUnit = c => state.unit === "F" ? c * 9 / 5 + 32 : c;
+const tempLabel = () => state.unit === "F" ? "°F" : "°C";
+function seaLevel(pHpa, tC) {
+  const h = state.altitude;
+  if (!h) return pHpa;
+  return pHpa * Math.pow(1 - (0.0065 * h) / (tC + 0.0065 * h + 273.15), -5.257);
+}
+function dewPoint(tC, rh) {
+  const a = 17.62, b = 243.12;
+  const g = Math.log(Math.max(rh, 1) / 100) + (a * tC) / (b + tC);
+  return (b * g) / (a - g);
+}
+const fmt = (v, d = 1) => (v == null || Number.isNaN(v)) ? "–" : v.toFixed(d);
+
+const SERIES = {
+  temp: { el: "c-temp", get: r => toUnit(r.temp_c), digits: 1, unit: () => tempLabel(), name: "Temperature" },
+  hum:  { el: "c-hum",  get: r => r.humidity, digits: 0, unit: () => "%", name: "Humidity" },
+  pres: { el: "c-pres", get: r => seaLevel(r.pressure_hpa, r.temp_c), digits: 1, unit: () => "hPa", name: "Pressure" },
+};
+
+// ---------- data ----------
+async function getJSON(url) {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`${url} -> ${res.status}`);
+  return res.json();
+}
+
+async function load() {
+  try {
+    const [config, latest] = await Promise.all([getJSON("/api/config"), getJSON("/api/latest")]);
+    state.altitude = Number(config.altitude_m) || 0;
+    state.latest = latest;
+    syncDevices();
+    if (!state.device) { render(); return; }
+    const q = new URLSearchParams({ hours: state.hours, bucket: BUCKETS[state.hours], device: state.device });
+    state.rows = (await getJSON(`/api/history?${q}`)).map(r => ({ ...r, t: Date.parse(r.received_at) }));
+    render();
+  } catch (err) {
+    const s = document.getElementById("status");
+    s.textContent = "";
+    const e = document.createElement("span");
+    e.className = "error";
+    e.textContent = "Can't reach the receiver. Is receiver.py running?";
+    s.append(e);
+    console.error(err);
+  }
+}
+
+function syncDevices() {
+  const sel = document.getElementById("device");
+  const names = state.latest.map(r => r.device);
+  if (!names.includes(state.device)) state.device = names[0] || "";
+  sel.hidden = names.length < 2;
+  sel.replaceChildren(...names.map(n => {
+    const o = document.createElement("option");
+    o.value = n; o.textContent = n; o.selected = n === state.device;
+    return o;
+  }));
+}
+
+// ---------- rendering ----------
+function render() {
+  const latest = state.latest.find(r => r.device === state.device);
+  const title = document.getElementById("title");
+  title.textContent = state.device ? `Weather station · ${state.device}` : "Weather station";
+  renderStatus(latest);
+  renderTiles(latest);
+  document.getElementById("u-temp").textContent = tempLabel();
+  document.getElementById("h-pres").firstChild.textContent = state.altitude ? "Pressure, sea level " : "Pressure, station ";
+  document.getElementById("l-pres").textContent = state.altitude ? "Pressure (sea level)" : "Pressure (station)";
+  for (const key of Object.keys(SERIES)) drawChart(key);
+  renderTable();
+}
+
+function ago(ms) {
+  const m = Math.round(ms / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h} h ago`;
+  return `${Math.round(h / 24)} days ago`;
+}
+
+function renderStatus(latest) {
+  const s = document.getElementById("status");
+  s.textContent = "";
+  if (!latest) { s.textContent = "No readings yet. Start the station, or run fake_station.py."; return; }
+  const age = Date.now() - Date.parse(latest.received_at);
+  const badge = document.createElement("span");
+  const label = document.createElement("span");
+  badge.className = "badge " + (age > STALE_MS ? "stale" : "live");
+  label.textContent = age > STALE_MS ? "No data" : "Live";
+  badge.append(label);
+  const text = document.createElement("span");
+  const extra = latest.rssi != null ? ` · Wi-Fi ${latest.rssi} dBm` : "";
+  text.textContent = `Last reading ${ago(age)}${extra}`;
+  s.append(badge, text);
+}
+
+function setValue(id, value, unit) {
+  const el = document.getElementById(id);
+  el.textContent = value;
+  if (unit && value !== "–") {
+    const u = document.createElement("small");
+    u.textContent = unit;
+    el.append(u);
+  }
+}
+
+function rangeText(key) {
+  const vals = state.rows.map(SERIES[key].get).filter(Number.isFinite);
+  if (!vals.length) return "";
+  const d = SERIES[key].digits;
+  const span = { 24: "24 h", 168: "7 days", 720: "30 days" }[state.hours];
+  return `Low ${fmt(Math.min(...vals), d)} · High ${fmt(Math.max(...vals), d)} (${span})`;
+}
+
+function renderTiles(r) {
+  if (!r) { for (const id of ["v-temp", "v-hum", "v-pres", "v-dew"]) setValue(id, "–"); return; }
+  setValue("v-temp", fmt(toUnit(r.temp_c)), tempLabel());
+  setValue("v-hum", fmt(r.humidity, 0), "%");
+  setValue("v-pres", fmt(seaLevel(r.pressure_hpa, r.temp_c)), "hPa");
+  setValue("v-dew", fmt(toUnit(dewPoint(r.temp_c, r.humidity))), tempLabel());
+  document.getElementById("s-temp").textContent = rangeText("temp");
+  document.getElementById("s-hum").textContent = rangeText("hum");
+  document.getElementById("s-pres").textContent = pressureTrend();
+  document.getElementById("s-dew").textContent = "Fog or dew likely when close to the temperature";
+}
+
+function pressureTrend() {
+  // Change over the last 3 hours, the usual forecasting window.
+  const rows = state.rows;
+  if (rows.length < 2) return "";
+  const last = rows[rows.length - 1];
+  const target = last.t - 3 * 3600 * 1000;
+  const past = rows.find(r => r.t >= target);
+  if (!past || last.t - past.t < 2 * 3600 * 1000) return rangeText("pres");
+  const diff = seaLevel(last.pressure_hpa, last.temp_c) - seaLevel(past.pressure_hpa, past.temp_c);
+  const word = diff > 1 ? "Rising" : diff < -1 ? "Falling" : "Steady";
+  return `${word}: ${diff >= 0 ? "+" : ""}${diff.toFixed(1)} hPa in 3 h`;
+}
+
+function niceTicks(min, max, count = 4) {
+  if (min === max) { min -= 1; max += 1; }
+  const raw = (max - min) / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw);
+  const lo = Math.floor(min / step) * step;
+  const hi = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let v = lo; v <= hi + step / 2; v += step) ticks.push(+v.toFixed(10));
+  return { lo, hi, ticks, step };
+}
+
+function timeTicks(t0, t1) {
+  const HOUR = 3600e3, DAY = 24 * HOUR;
+  const span = t1 - t0;
+  const step = span <= 1.5 * DAY ? 3 * HOUR : span <= 10 * DAY ? DAY : 5 * DAY;
+  const ticks = [];
+  const d = new Date(t0);
+  if (step < DAY) { d.setMinutes(0, 0, 0); d.setHours(Math.ceil(d.getHours() / 3) * 3); }
+  else { d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + 1); }
+  while (d.getTime() <= t1) {
+    ticks.push(d.getTime());
+    if (step < DAY) d.setHours(d.getHours() + 3); else d.setDate(d.getDate() + step / DAY);
+  }
+  const label = t => {
+    const x = new Date(t);
+    if (step < DAY) {
+      return x.getHours() === 0
+        ? x.toLocaleDateString(undefined, { weekday: "short" })
+        : x.toLocaleTimeString(undefined, { hour: "numeric" });
+    }
+    return x.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  };
+  return { ticks, label };
+}
+
+function el(name, attrs, parent) {
+  const n = document.createElementNS(SVGNS, name);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  if (parent) parent.append(n);
+  return n;
+}
+
+const charts = {};
+
+function drawChart(key) {
+  const spec = SERIES[key];
+  const box = document.getElementById(spec.el);
+  const W = box.clientWidth, H = box.clientHeight;
+  const m = { l: 44, r: 12, t: 10, b: 22 };
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `${spec.name} chart` });
+  box.replaceChildren(svg);
+
+  const rows = state.rows;
+  const now = Date.now();
+  const t1 = now, t0 = now - state.hours * 3600e3;
+  const x = t => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
+  const pts = rows.map((r, i) => ({ t: r.t, v: spec.get(r), i })).filter(p => Number.isFinite(p.v));
+
+  if (!pts.length) {
+    el("text", { x: W / 2, y: H / 2, "text-anchor": "middle", class: "empty" }, svg).textContent = "No readings in this range";
+    charts[key] = null;
+    return;
+  }
+
+  const vals = pts.map(p => p.v);
+  const { lo, hi, ticks, step } = niceTicks(Math.min(...vals), Math.max(...vals));
+  const y = v => m.t + (1 - (v - lo) / (hi - lo)) * (H - m.t - m.b);
+  const decimals = step < 1 ? 1 : 0;
+
+  for (const v of ticks) {
+    el("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: v === lo ? "baseline" : "gridline" }, svg);
+    el("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end", class: "tick" }, svg).textContent = v.toFixed(decimals);
+  }
+  const tt = timeTicks(t0, t1);
+  for (const t of tt.ticks) {
+    el("text", { x: x(t), y: H - 6, "text-anchor": "middle", class: "tick" }, svg).textContent = tt.label(t);
+  }
+
+  // Break the line where readings are missing (station offline).
+  const interval = (BUCKETS[state.hours] || 60) * 1000;
+  const gap = Math.max(3 * interval, 5 * 60 * 1000);
+  let d = "";
+  pts.forEach((p, k) => {
+    const cmd = k === 0 || p.t - pts[k - 1].t > gap ? "M" : "L";
+    d += `${cmd}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`;
+  });
+  el("path", { d, class: "line" }, svg);
+  const last = pts[pts.length - 1];
+  el("circle", { cx: x(last.t), cy: y(last.v), r: 4, class: "dot" }, svg);
+
+  const hover = el("g", { visibility: "hidden" }, svg);
+  const hLine = el("line", { y1: m.t, y2: H - m.b, class: "crosshair" }, hover);
+  const hDot = el("circle", { r: 4, class: "dot" }, hover);
+  const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, class: "hit", tabindex: 0,
+    "aria-label": `${spec.name} chart. Use left and right arrow keys to read values.` }, svg);
+
+  charts[key] = { pts, x, y, hover, hLine, hDot, svg };
+
+  const pick = clientX => {
+    const r = svg.getBoundingClientRect();
+    const px = (clientX - r.left) * (W / r.width);
+    const t = t0 + ((px - m.l) / (W - m.l - m.r)) * (t1 - t0);
+    let best = 0;
+    for (let k = 1; k < rows.length; k++) if (Math.abs(rows[k].t - t) < Math.abs(rows[best].t - t)) best = k;
+    return best;
+  };
+  hit.addEventListener("pointermove", e => showHover(pick(e.clientX), e.clientX, e.clientY));
+  hit.addEventListener("pointerleave", hideHover);
+  hit.addEventListener("blur", hideHover);
+  hit.addEventListener("keydown", e => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    let i = state.hoverIndex ?? rows.length - 1;
+    i = Math.max(0, Math.min(rows.length - 1, i + (e.key === "ArrowRight" ? 1 : -1)));
+    const r = svg.getBoundingClientRect();
+    showHover(i, r.left + x(rows[i].t) * (r.width / W), r.top + r.height / 2);
+  });
+}
+
+function showHover(i, clientX, clientY) {
+  state.hoverIndex = i;
+  const row = state.rows[i];
+  for (const key of Object.keys(SERIES)) {
+    const c = charts[key];
+    if (!c) continue;
+    const p = c.pts.find(q => q.i === i);
+    if (!p) { c.hover.setAttribute("visibility", "hidden"); continue; }
+    c.hLine.setAttribute("x1", c.x(p.t)); c.hLine.setAttribute("x2", c.x(p.t));
+    c.hDot.setAttribute("cx", c.x(p.t)); c.hDot.setAttribute("cy", c.y(p.v));
+    c.hover.setAttribute("visibility", "visible");
+  }
+  const tip = document.getElementById("tooltip");
+  const time = document.createElement("div");
+  time.className = "time";
+  const when = new Date(row.t);
+  time.textContent = when.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+    + (row.samples ? " (average)" : "");
+  const lines = Object.entries(SERIES).map(([, s]) => {
+    const div = document.createElement("div");
+    div.className = "row";
+    const b = document.createElement("b");
+    b.textContent = `${fmt(s.get(row), s.digits)} ${s.unit()}`;
+    const n = document.createElement("span");
+    n.textContent = s.name;
+    div.append(b, n);
+    return div;
+  });
+  tip.replaceChildren(time, ...lines);
+  tip.style.display = "block";
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  let left = clientX + 14;
+  if (left + tw > window.innerWidth - 8) left = clientX - tw - 14;
+  tip.style.left = `${Math.max(8, left)}px`;
+  tip.style.top = `${Math.max(8, Math.min(clientY - th / 2, window.innerHeight - th - 8))}px`;
+}
+
+function hideHover() {
+  state.hoverIndex = null;
+  document.getElementById("tooltip").style.display = "none";
+  for (const c of Object.values(charts)) if (c) c.hover.setAttribute("visibility", "hidden");
+}
+
+function renderTable() {
+  if (!document.getElementById("table-details").open) return;
+  const table = document.getElementById("table");
+  const head = document.createElement("tr");
+  for (const h of ["Time", `Temperature (${tempLabel()})`, "Humidity (%)", `Pressure (hPa${state.altitude ? ", sea level" : ""})`, `Dew point (${tempLabel()})`]) {
+    const th = document.createElement("th"); th.textContent = h; head.append(th);
+  }
+  const MAX = 500;
+  const rows = state.rows.slice(-MAX).reverse().map(r => {
+    const tr = document.createElement("tr");
+    const cells = [
+      new Date(r.t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+      fmt(toUnit(r.temp_c)), fmt(r.humidity, 0), fmt(seaLevel(r.pressure_hpa, r.temp_c)),
+      fmt(toUnit(dewPoint(r.temp_c, r.humidity))),
+    ];
+    for (const c of cells) { const td = document.createElement("td"); td.textContent = c; tr.append(td); }
+    return tr;
+  });
+  table.replaceChildren(head, ...rows);
+  const avg = BUCKETS[state.hours] ? ` Values are ${BUCKETS[state.hours] / 60}-minute averages.` : "";
+  document.getElementById("table-note").textContent =
+    `${state.rows.length > MAX ? `Newest ${MAX} of ${state.rows.length} rows.` : `${state.rows.length} rows.`}${avg}`;
+}
+
+// ---------- controls ----------
+function setPressed(groupId, attr, value) {
+  for (const b of document.querySelectorAll(`#${groupId} button`)) b.setAttribute("aria-pressed", String(b.dataset[attr] === String(value)));
+}
+document.getElementById("range").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  state.hours = Number(b.dataset.hours); store.set("ws.hours", state.hours);
+  setPressed("range", "hours", state.hours); load();
+});
+document.getElementById("units").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  state.unit = b.dataset.unit; store.set("ws.unit", state.unit);
+  setPressed("units", "unit", state.unit); render();
+});
+document.getElementById("device").addEventListener("change", e => {
+  state.device = e.target.value; store.set("ws.device", state.device); load();
+});
+document.getElementById("table-details").addEventListener("toggle", renderTable);
+let resizeTimer;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 150); });
+
+setPressed("range", "hours", state.hours);
+setPressed("units", "unit", state.unit);
+load();
+setInterval(load, REFRESH_MS);
+</script>
+</body>
+</html>

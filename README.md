@@ -34,10 +34,21 @@ $env:WS_TOKEN = "pick-a-long-random-string"
 python server\receiver.py
 ```
 
-Readings go into `data\weather.db` (git-ignored). Check it from a browser:
+Readings go into `data\weather.db` (git-ignored).
 
-- `http://localhost:8080/api/latest` shows the newest reading
-- `http://localhost:8080/api/history?hours=24` shows the last 24 hours
+Open the dashboard at **http://localhost:8080/**. It also works from a phone on the home Wi-Fi at `http://<PC IP>:8080/`. It shows:
+
+- current temperature, humidity, pressure and dew point, plus the low and high for the range
+- the pressure trend over 3 hours (rising, falling or steady)
+- linked history charts for 24 hours, 7 days or 30 days; hover or use the arrow keys to read values
+- °F or °C, light and dark mode, and a data table
+- a red "No data" badge when the station hasn't reported for 5 minutes
+
+The 7-day and 30-day views use 15-minute and hourly averages. Gaps in the line mean the station was offline.
+
+For sea-level pressure (the number forecasts use), set your altitude in metres before starting the receiver, e.g. `$env:WS_ALTITUDE_M = "120"`. Without it the dashboard shows station pressure.
+
+Raw data: `/api/latest`, `/api/history?hours=24` (add `&bucket=3600` for hourly averages).
 
 To test without the ESP32, run `python server\fake_station.py` in a second window with the same `WS_TOKEN`.
 
@@ -54,7 +65,7 @@ The first time, Windows Firewall asks whether to allow Python. Allow it on **pri
 
 The PC's IP address can change. Give it a DHCP reservation in the router so `RECEIVER_URL` stays correct.
 
-Pressure is station pressure, not sea-level pressure, so it reads lower than the weather forecast. The dashboard can correct for altitude later.
+The station sends station pressure. The dashboard converts it to sea-level pressure when `WS_ALTITUDE_M` is set.
 
 ## Plan
 

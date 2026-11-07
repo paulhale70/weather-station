@@ -3,9 +3,12 @@
 Accepts readings from the ESP32 and stores them in SQLite. Standard library only.
 
 Endpoints
+  GET  /                       dashboard (dashboard.html)
   POST /api/readings           JSON body from the station; needs header X-Station-Token
   GET  /api/latest             newest reading per device
-  GET  /api/history?hours=24   readings from the last N hours (optional &device=name)
+  GET  /api/history?hours=24   readings from the last N hours
+                               (optional &device=name, &bucket=seconds to average)
+  GET  /api/config             dashboard settings (altitude)
   GET  /health                 "ok"
 
 Settings (environment variables)
@@ -13,6 +16,7 @@ Settings (environment variables)
   WS_PORT   port to listen on (default 8080)
   WS_HOST   address to bind (default 0.0.0.0, so the ESP32 can reach it)
   WS_DB     SQLite file (default ../data/weather.db next to this folder)
+  WS_ALTITUDE_M  station altitude in metres, so the dashboard can show sea-level pressure (default 0)
 
 Run:  set WS_TOKEN=... then  python server/receiver.py
 """
@@ -32,6 +36,8 @@ DB_PATH = Path(os.environ.get("WS_DB", ROOT / "data" / "weather.db"))
 TOKEN = os.environ.get("WS_TOKEN", "")
 HOST = os.environ.get("WS_HOST", "0.0.0.0")
 PORT = int(os.environ.get("WS_PORT", "8080"))
+ALTITUDE_M = float(os.environ.get("WS_ALTITUDE_M", "0"))
+DASHBOARD = Path(__file__).resolve().parent / "dashboard.html"
 MAX_BODY = 4096
 
 # field -> (min, max). Values outside these ranges are rejected as sensor errors.
@@ -105,6 +111,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_file(self, path, content_type):
+        try:
+            data = path.read_bytes()
+        except OSError:
+            return self.send_json(404, {"error": "not found"})
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_POST(self):
         if urlparse(self.path).path != "/api/readings":
             return self.send_json(404, {"error": "not found"})
@@ -143,20 +161,37 @@ class Handler(BaseHTTPRequestHandler):
                     ") last ON r.id = last.id ORDER BY r.device"
                 ).fetchall()
             return self.send_json(200, [dict(r) for r in rows])
+        if url.path in ("/", "/index.html"):
+            return self.send_file(DASHBOARD, "text/html; charset=utf-8")
+        if url.path == "/api/config":
+            return self.send_json(200, {"altitude_m": ALTITUDE_M})
         if url.path == "/api/history":
             try:
                 hours = float(query.get("hours", ["24"])[0])
+                bucket = int(query.get("bucket", ["0"])[0])
             except ValueError:
-                return self.send_json(400, {"error": "hours must be a number"})
+                return self.send_json(400, {"error": "hours and bucket must be numbers"})
             hours = max(0.0, min(hours, 24 * 366))
+            bucket = max(0, min(bucket, 86400))
             since = (utc_now() - timedelta(hours=hours)).isoformat()
-            sql = "SELECT * FROM readings WHERE received_at >= ?"
+            where = "WHERE received_at >= ?"
             args = [since]
             if "device" in query:
-                sql += " AND device = ?"
+                where += " AND device = ?"
                 args.append(query["device"][0])
+            if bucket:
+                # Average into fixed time buckets; received_at becomes the bucket start.
+                sql = (
+                    "SELECT strftime('%Y-%m-%dT%H:%M:%S+00:00', (CAST(strftime('%s', received_at) AS INTEGER)"
+                    f" / {bucket}) * {bucket}, 'unixepoch') AS received_at, device,"
+                    " ROUND(AVG(temp_c), 2) AS temp_c, ROUND(AVG(humidity), 2) AS humidity,"
+                    " ROUND(AVG(pressure_hpa), 2) AS pressure_hpa, COUNT(*) AS samples"
+                    f" FROM readings {where} GROUP BY device, 1 ORDER BY 1"
+                )
+            else:
+                sql = f"SELECT * FROM readings {where} ORDER BY received_at"
             with connect() as conn:
-                rows = conn.execute(sql + " ORDER BY received_at", args).fetchall()
+                rows = conn.execute(sql, args).fetchall()
             return self.send_json(200, [dict(r) for r in rows])
         self.send_json(404, {"error": "not found"})
 
