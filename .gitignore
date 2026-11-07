@@ -1,0 +1,9 @@
+# Wi-Fi password and station token
+firmware/**/secrets.h
+.env
+
+# Readings database
+data/
+
+__pycache__/
+*.pyc

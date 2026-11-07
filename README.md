@@ -23,6 +23,39 @@ Prices are rough estimates. Check them before buying.
 ESP32 (outside) --Wi-Fi, HTTP POST JSON every ~60 s--> PC receiver (Python) --> SQLite --> web dashboard
 ```
 
+## Setup
+
+### 1. Receiver (on the PC)
+
+Needs Python 3 only, no extra packages.
+
+```powershell
+$env:WS_TOKEN = "pick-a-long-random-string"
+python server\receiver.py
+```
+
+Readings go into `data\weather.db` (git-ignored). Check it from a browser:
+
+- `http://localhost:8080/api/latest` shows the newest reading
+- `http://localhost:8080/api/history?hours=24` shows the last 24 hours
+
+To test without the ESP32, run `python server\fake_station.py` in a second window with the same `WS_TOKEN`.
+
+The first time, Windows Firewall asks whether to allow Python. Allow it on **private** networks, or the ESP32 can't reach the PC. Port 8080 isn't secured with HTTPS, so keep it on the home network only.
+
+### 2. Firmware (on the ESP32)
+
+1. Install the Arduino IDE, then add the **esp32** board package by Espressif (Boards Manager).
+2. Install **Adafruit BME280 Library** (Library Manager). Say yes to its dependencies.
+3. Wire the BME280: VIN to 3V3, GND to GND, SDA to GPIO21, SCL to GPIO22.
+4. Copy `firmware/weather_station/secrets.h.example` to `secrets.h` in the same folder. Fill in your Wi-Fi details (2.4 GHz only), the PC's IP, and the same token as `WS_TOKEN`. `secrets.h` is git-ignored.
+5. Open `firmware/weather_station/weather_station.ino`, choose board **ESP32 Dev Module**, and upload.
+6. Open Serial Monitor at 115200 baud. You should see `POST ... -> 201` every 60 seconds.
+
+The PC's IP address can change. Give it a DHCP reservation in the router so `RECEIVER_URL` stays correct.
+
+Pressure is station pressure, not sea-level pressure, so it reads lower than the weather forecast. The dashboard can correct for altitude later.
+
 ## Plan
 
 1. Buy the parts. Start with ESP32 + BME280 only.
